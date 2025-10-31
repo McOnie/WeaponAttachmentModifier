@@ -13,8 +13,8 @@ namespace WeaponAttachmentModifier
 {
     public record ModMetadata : AbstractModMetadata
     {
-        public override string ModGuid { get; init; } = "com.mconie.weaponattatchmentmodifier";
-        public override string Name { get; init; } = "WeaponattAtchmentModifier";
+        public override string ModGuid { get; init; } = "com.mconie.weaponattachmentmodifier";
+        public override string Name { get; init; } = "WeaponAttachmentModifier";
         public override string Author { get; init; } = "McOnie";
         public override List<string>? Contributors { get; init; } = null;
         public override SemanticVersioning.Version Version { get; init; } = new("1.0.0");
