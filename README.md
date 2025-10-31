@@ -39,4 +39,4 @@ Like most other mods, simply drop the contents of the zip file into root of your
 ***
 
 ## Bugs, Problems or Suggestions
-If you find any bugs or problems, please leave a comment. If you have any suggestion on how I can improve the mod, let me know.
+If you find any bugs or problems, please leave a comment on the SPT mod page. If you have any suggestion on how I can improve the mod, let me know.
