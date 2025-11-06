@@ -17,8 +17,8 @@ namespace WeaponAttachmentModifier
         public override string Name { get; init; } = "WeaponAttachmentModifier";
         public override string Author { get; init; } = "McOnie";
         public override List<string>? Contributors { get; init; } = null;
-        public override SemanticVersioning.Version Version { get; init; } = new("1.0.0");
-        public override SemanticVersioning.Range SptVersion { get; init; } = new("~4.0.2");
+        public override SemanticVersioning.Version Version { get; init; } = new("2.0.0");
+        public override SemanticVersioning.Range SptVersion { get; init; } = new("~4.0.3");
         public override List<string>? Incompatibilities { get; init; } = null;
         public override Dictionary<string, SemanticVersioning.Range>? ModDependencies { get; init; } = null;
         public override string? Url { get; init; } = null;
@@ -35,16 +35,25 @@ namespace WeaponAttachmentModifier
         public float? DurabilityBurnOverride { get; set; }
     }
 
+    public class StatSettings
+    {
+        public bool EnableHardSetOverride { get; set; } = false;
+        public float HardSetOverrideValue { get; set; } = 0f;
+        public bool EnableAdditiveOverride { get; set; } = false;
+        public float AdditiveOverrideValue { get; set; } = 0f;
+        public float Multiplier { get; set; } = 1.0f;
+    }
+
     public class ModConfig
     {
-        public float ForegripErgonomicsMultiplier { get; set; } = 1.0f;
-        public float StockErgonomicsMultiplier { get; set; } = 1.0f;
-        public float PistolGripErgonomicsMultiplier { get; set; } = 1.0f;
-        public float MuzzleDeviceErgonomicsMultiplier { get; set; } = 1.0f;
-        public float ForegripRecoilMultiplier { get; set; } = 1.0f;
-        public float StockRecoilMultiplier { get; set; } = 1.0f;
-        public float MuzzleDeviceRecoilMultiplier { get; set; } = 1.0f;
-        public float MuzzleDurabilityBurnMultiplier { get; set; } = 1.0f;
+        public StatSettings ForegripErgonomics { get; set; } = new();
+        public StatSettings ForegripRecoil { get; set; } = new();
+        public StatSettings StockErgonomics { get; set; } = new();
+        public StatSettings StockRecoil { get; set; } = new();
+        public StatSettings PistolGripErgonomics { get; set; } = new();
+        public StatSettings MuzzleDeviceErgonomics { get; set; } = new();
+        public StatSettings MuzzleDeviceRecoil { get; set; } = new();
+        public StatSettings MuzzleDeviceDurability { get; set; } = new();
 
         public List<AttachmentOverride> SpecificAttachmentOverrides { get; set; } = new List<AttachmentOverride>();
     }
@@ -55,24 +64,18 @@ namespace WeaponAttachmentModifier
         ModHelper _modHelper,
         DatabaseServer _databaseServer) : IOnLoad
     {
-        private static readonly string ForegripID       = "55818af64bdc2d5b648b4570";
-        private static readonly string StockID          = "55818a594bdc2db9688b456a";
-        private static readonly string PistolGripID     = "55818a684bdc2ddd698b456d";
-        private static readonly string MuzzleBrakeID    = "5448fe394bdc2d0d028b456c";
-        private static readonly string SuppressorID     = "550aa4cd4bdc2dd8348b456c";
-        private static readonly string MuzzleAdapterID  = "550aa4dd4bdc2dc9348b4569";
-
-        private static readonly List<string> AllTargetAttachmentIDs = new List<string>
-        {
-            ForegripID, StockID, PistolGripID, MuzzleBrakeID, SuppressorID, MuzzleAdapterID
-        };
+        private static readonly string ForegripID = "55818af64bdc2d5b648b4570";
+        private static readonly string StockID = "55818a594bdc2db9688b456a";
+        private static readonly string PistolGripID = "55818a684bdc2ddd698b456d";
+        private static readonly string MuzzleBrakeID = "5448fe394bdc2d0d028b456c";
+        private static readonly string SuppressorID = "550aa4cd4bdc2dd8348b456c";
+        private static readonly string MuzzleAdapterID = "550aa4dd4bdc2dc9348b4569";
 
         public Task OnLoad()
         {
             var modFolder = _modHelper.GetAbsolutePathToModFolder(Assembly.GetExecutingAssembly());
             var configDir = Path.Combine(modFolder, "config");
             var modConfig = _modHelper.GetJsonDataFromFile<ModConfig>(configDir, "config.jsonc");
-
             var itemDB = _databaseServer.GetTables().Templates.Items;
 
             int itemsModified = 0;
@@ -80,78 +83,37 @@ namespace WeaponAttachmentModifier
             foreach (var item in itemDB.Values)
             {
                 var itemProps = item.Properties;
+                if (itemProps == null || item.Parent == null) continue;
 
-                if (itemProps == null || item.Parent == null)
+                var overrideData = modConfig.SpecificAttachmentOverrides.Find(o => o.ItemId == item.Id);
+                if (overrideData != null)
+                {
+                    ApplySpecificOverride(itemProps, overrideData, _logger, item.Name);
+                    itemsModified++;
                     continue;
+                }
 
                 bool modified = false;
-                float recoilMultiplier = 1.0f;
-                float ergoMultiplier = 1.0f;
-                bool isMuzzleDevice = false;
 
                 if (item.Parent == ForegripID)
                 {
-                    recoilMultiplier = modConfig.ForegripRecoilMultiplier;
-                    ergoMultiplier = modConfig.ForegripErgonomicsMultiplier;
+                    modified |= ApplyCategoryLogic(itemProps, "Ergonomics", modConfig.ForegripErgonomics);
+                    modified |= ApplyCategoryLogic(itemProps, "Recoil", modConfig.ForegripRecoil);
                 }
                 else if (item.Parent == StockID)
                 {
-                    recoilMultiplier = modConfig.StockRecoilMultiplier;
-                    ergoMultiplier = modConfig.StockErgonomicsMultiplier;
+                    modified |= ApplyCategoryLogic(itemProps, "Ergonomics", modConfig.StockErgonomics);
+                    modified |= ApplyCategoryLogic(itemProps, "Recoil", modConfig.StockRecoil);
                 }
                 else if (item.Parent == PistolGripID)
                 {
-                    ergoMultiplier = modConfig.PistolGripErgonomicsMultiplier;
+                    modified |= ApplyCategoryLogic(itemProps, "Ergonomics", modConfig.PistolGripErgonomics);
                 }
                 else if (item.Parent == MuzzleBrakeID || item.Parent == SuppressorID || item.Parent == MuzzleAdapterID)
                 {
-                    recoilMultiplier = modConfig.MuzzleDeviceRecoilMultiplier;
-                    ergoMultiplier = modConfig.MuzzleDeviceErgonomicsMultiplier;
-                    isMuzzleDevice = true;
-                }
-
-                if (ergoMultiplier != 1.0f && itemProps.Ergonomics.HasValue)
-                {
-                    float calculatedValue;
-                    float baseErgo = (float)itemProps.Ergonomics.Value;
-                    if (baseErgo < 0)
-                    {
-                        if (Math.Abs(ergoMultiplier) > 0.01f)
-                        {
-                            calculatedValue = baseErgo / ergoMultiplier;
-                        }
-                        else { calculatedValue = baseErgo; }
-                    }
-                    else
-                    {
-                        calculatedValue = baseErgo * ergoMultiplier;
-                    }
-
-                    SetNumber(itemProps, "Ergonomics", new[] { "Ergonomics" }, (int)Math.Round(calculatedValue));
-                    modified = true;
-                }
-
-                if (recoilMultiplier != 1.0f && itemProps.Recoil.HasValue)
-                {
-                    float calculatedValue = (float)(itemProps.Recoil.Value * recoilMultiplier);
-                    SetNumber(itemProps, "Recoil", new[] { "Recoil" }, (int)Math.Round(calculatedValue));
-                    modified = true;
-                }
-
-                if (isMuzzleDevice && modConfig.MuzzleDurabilityBurnMultiplier != 1.0f && itemProps.DurabilityBurnModificator.HasValue)
-                {
-                    float calculatedBurn = (float)(itemProps.DurabilityBurnModificator.Value * modConfig.MuzzleDurabilityBurnMultiplier + 1);
-
-                    SetFloat(itemProps, "DurabilityBurnModificator", new[] { "DurabilityBurnModificator" }, calculatedBurn);
-                    modified = true;
-                }
-
-                var overrideData = modConfig.SpecificAttachmentOverrides.Find(o => o.ItemId == item.Id);
-
-                if (overrideData != null)
-                {
-                    ApplyOverride(itemProps, overrideData, _logger, item.Name);
-                    modified = true;
+                    modified |= ApplyCategoryLogic(itemProps, "Ergonomics", modConfig.MuzzleDeviceErgonomics);
+                    modified |= ApplyCategoryLogic(itemProps, "Recoil", modConfig.MuzzleDeviceRecoil);
+                    modified |= ApplyCategoryLogic(itemProps, "DurabilityBurnModificator", modConfig.MuzzleDeviceDurability);
                 }
 
                 if (modified)
@@ -161,48 +123,106 @@ namespace WeaponAttachmentModifier
             }
 
             _logger.Success($"[Weapon Attachment Modifier] Mod Loaded: Stats changed for {itemsModified} attachments.");
-
             return Task.CompletedTask;
         }
 
-        private void ApplyOverride(TemplateItemProperties itemProps, AttachmentOverride overrideData, ISptLogger<WeaponAttachmentModifier> _logger, string itemName)
+        private bool ApplyCategoryLogic(TemplateItemProperties props, string propName, StatSettings settings)
         {
-            string name = string.IsNullOrEmpty(overrideData.Name) ? itemName : overrideData.Name;
+            float? baseValue = GetFloatValue(props, propName);
+            
+            if (baseValue == null) return false; 
 
-            if (overrideData.ErgonomicsOverride.HasValue)
+            float finalValue = baseValue.Value;
+            bool valueSet = false;
+
+            if (settings.EnableHardSetOverride)
             {
-                SetNumber(itemProps, "Ergonomics", new[] { "Ergonomics" }, (int)Math.Round(overrideData.ErgonomicsOverride.Value));
-                _logger.Success($"[Weapon Attachment Modifier] Overriding {name} Ergo to {itemProps.Ergonomics}");
+                finalValue = settings.HardSetOverrideValue;
+                valueSet = true;
+            }
+            else if (settings.EnableAdditiveOverride)
+            {
+                finalValue = baseValue.Value + settings.AdditiveOverrideValue;
+                valueSet = true;
+            }
+            else if (settings.Multiplier != 1.0f)
+            {
+                if (propName == "Ergonomics" && baseValue.Value < 0)
+                {
+                    if (Math.Abs(settings.Multiplier) > 0.01f)
+                        finalValue = baseValue.Value / settings.Multiplier;
+                }
+                else
+                {
+                    finalValue = baseValue.Value * settings.Multiplier;
+                }
+                valueSet = true;
             }
 
-            if (overrideData.RecoilPercentageOverride.HasValue)
+            if (valueSet)
             {
-                SetNumber(itemProps, "Recoil", new[] { "Recoil" }, (int)Math.Round(overrideData.RecoilPercentageOverride.Value));
-                _logger.Success($"[Weapon Attachment Modifier] Overriding {name} Recoil % to {itemProps.Recoil}");
+                if (propName == "DurabilityBurnModificator")
+                    SetFloat(props, propName, finalValue);
+                else
+                    SetNumber(props, propName, (int)Math.Round(finalValue));
+                
+                return true;
             }
+            return false;
+        }
 
-            if (overrideData.DurabilityBurnOverride.HasValue)
+        private float? GetFloatValue(TemplateItemProperties props, string propName)
+        {
+            switch (propName)
             {
-                SetFloat(itemProps, "DurabilityBurnModificator", new[] { "DurabilityBurnModificator" }, overrideData.DurabilityBurnOverride.Value);
-                _logger.Success($"[Weapon Attachment Modifier] Overriding {name} Durability Burn Rate to {itemProps.DurabilityBurnModificator}");
+                case "Ergonomics":
+                    return (float?)props.Ergonomics;
+                case "Recoil":
+                    return (float?)props.Recoil;
+                case "DurabilityBurnModificator":
+                    return (float?)props.DurabilityBurnModificator;
+                default:
+                    return null;
             }
         }
 
-        private static (PropertyInfo? pi, object? owner) FindProp(object obj, string jsonName, string[] candidates)
+        private void ApplySpecificOverride(TemplateItemProperties itemProps, AttachmentOverride overrideData, ISptLogger<WeaponAttachmentModifier> _logger, string itemName)
+        {
+            string name = string.IsNullOrEmpty(overrideData.Name) ? itemName : overrideData.Name;
+
+            if (overrideData.ErgonomicsOverride.HasValue && itemProps.Ergonomics.HasValue)
+            {
+                SetNumber(itemProps, "Ergonomics", (int)Math.Round(overrideData.ErgonomicsOverride.Value));
+                _logger.Info($"[Weapon Attachment Modifier] Overriding {name} Ergo to {itemProps.Ergonomics}");
+            }
+
+            if (overrideData.RecoilPercentageOverride.HasValue && itemProps.Recoil.HasValue)
+            {
+                SetNumber(itemProps, "Recoil", (int)Math.Round(overrideData.RecoilPercentageOverride.Value));
+                _logger.Info($"[Weapon Attachment Modifier] Overriding {name} Recoil % to {itemProps.Recoil}");
+            }
+
+            if (overrideData.DurabilityBurnOverride.HasValue && itemProps.DurabilityBurnModificator.HasValue)
+            {
+                SetFloat(itemProps, "DurabilityBurnModificator", overrideData.DurabilityBurnOverride.Value);
+                _logger.Info($"[Weapon Attachment Modifier] Overriding {name} Durability Burn Rate to {itemProps.DurabilityBurnModificator}");
+            }
+        }
+
+        private static (PropertyInfo? pi, object? owner) FindProp(object obj, string jsonName)
         {
             foreach (var p in obj.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
             {
                 if (string.Equals(p.Name, jsonName, StringComparison.OrdinalIgnoreCase)) return (p, obj);
-                if (Array.Exists(candidates, c => string.Equals(c, p.Name, StringComparison.OrdinalIgnoreCase))) return (p, obj);
                 var j = p.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name;
                 if (!string.IsNullOrEmpty(j) && string.Equals(j, jsonName, StringComparison.OrdinalIgnoreCase)) return (p, obj);
             }
             return (null, null);
         }
 
-        private static void SetNumber(object obj, string jsonName, string[] candidates, int value)
+        private static void SetNumber(object obj, string jsonName, int value)
         {
-            var (pi, owner) = FindProp(obj, jsonName, candidates);
+            var (pi, owner) = FindProp(obj, jsonName);
             if (pi is null || owner is null) return;
             try
             {
@@ -213,9 +233,9 @@ namespace WeaponAttachmentModifier
             catch { }
         }
 
-        private static void SetFloat(object obj, string jsonName, string[] candidates, float value)
+        private static void SetFloat(object obj, string jsonName, float value)
         {
-            var (pi, owner) = FindProp(obj, jsonName, candidates);
+            var (pi, owner) = FindProp(obj, jsonName);
             if (pi is null || owner is null) return;
             try
             {
